@@ -1,0 +1,89 @@
+import geopandas as gpd
+from shapely.geometry import box
+import folium
+
+def main():
+    # 1. データの読み込み
+    # 国土交通省のShapefileはShift-JIS(cp932)でエンコードされているため指定
+    print("データを読み込んでいます...")
+    file_path = "./A31-21_33_GML/A31a-21_33.shp" # ※ご自身のファイルパスに書き換えてください
+    gdf = gpd.read_file(file_path, encoding="cp932")
+
+    # 2. 座標系の定義と変換
+    # 元データに座標系が定義されていない場合はEPSG:4612（日本測地系）をセット
+    if gdf.crs is None:
+        gdf.set_crs(epsg=4612, inplace=True)
+    # Folium（Web地図）で表示するために世界測地系（EPSG:4326）に変換
+    gdf = gdf.to_crs(epsg=4326)
+
+    # 3. 空間クリッピング（データ量の削減）
+    # 倉敷駅周辺を指定し、ブラウザがクラッシュしないサイズにデータを切り取る
+    print("指定範囲でデータをクリッピングしています...")
+    bbox = box(133.72, 34.56, 133.80, 34.63) 
+    gdf_clipped = gdf.clip(bbox)
+    
+    if len(gdf_clipped) == 0:
+        print("エラー: 指定した範囲にデータがありません。")
+        return
+
+    # 4. ツールチップ（ホバー表示）用のデータ整形
+    target_col = "A31a_205"
+    depth_mapping = {
+        1: "0.5m未満", 
+        2: "0.5m ～ 3.0m未満", 
+        3: "3.0m ～ 5.0m未満",
+        4: "5.0m ～ 10.0m未満", 
+        5: "10.0m ～ 20.0m未満", 
+        6: "20.0m以上"
+    }
+    # SettingWithCopyWarningを防ぐため .loc を使用
+    gdf_clipped.loc[:, "浸水深_m"] = gdf_clipped[target_col].map(depth_mapping)
+    gdf_clipped.loc[:, "河川名"] = gdf_clipped["A31a_202"]
+
+    # （オプション）図形を簡略化してさらに軽くする場合は以下のコメントアウトを外す
+    # gdf_clipped.loc[:, 'geometry'] = gdf_clipped['geometry'].simplify(tolerance=0.0001, preserve_topology=True)
+
+    # 5. 地図の中心座標を計算してFoliumマップを初期化
+    bounds = gdf_clipped.total_bounds 
+    center_lat = (bounds[1] + bounds[3]) / 2
+    center_lon = (bounds[0] + bounds[2]) / 2
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
+
+    # 6. 色分け関数の定義
+    def get_color(feature):
+        rank = feature['properties'].get(target_col)
+        try: rank = int(rank)
+        except: return '#cccccc'
+        
+        if rank == 1: return '#ffffb2'
+        elif rank == 2: return '#ffcc00'
+        elif rank == 3: return '#ff9900'
+        elif rank == 4: return '#ff3300'
+        elif rank == 5: return '#cc0000'
+        elif rank == 6: return '#800000'
+        else: return '#cccccc'
+
+    # 7. ポリゴンデータを地図に重ねる
+    print("地図を生成しています...")
+    folium.GeoJson(
+        gdf_clipped,
+        style_function=lambda feature: {
+            'fillColor': get_color(feature),
+            'color': get_color(feature), # 枠線を塗りつぶしと同色にして隙間（ストライプ）を防ぐ
+            'weight': 0.8,               # 隙間を埋めるための微小な太さ
+            'fillOpacity': 0.7
+        },
+        tooltip=folium.GeoJsonTooltip(
+            fields=['河川名', '浸水深_m'],
+            aliases=['対象河川:', '想定浸水深:'],
+            localize=True
+        )
+    ).add_to(m)
+
+    # 8. HTMLファイルとして出力
+    output_file = "kurashiki_flood_map_perfect.html"
+    m.save(output_file)
+    print(f"完了しました！ {output_file} をブラウザで開いて確認してください。")
+
+if __name__ == "__main__":
+    main()

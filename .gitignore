@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Generated outputs
+*.html
+
+# Local GIS input data
+A31-21_33_GML/
